@@ -13,4 +13,14 @@
 (test-equal "5" '(+ a (f b) x) '{a + (f b) + x})
 (test-equal "6" '(and (> a 0) (>= b 1)) '{{a > 0} and {b >= 1}})
 
+;; from http://srfi.schemers.org/srfi-105/mail-archive/msg00054.html
+(test-equal "" '(<= n 2) '{n <= 2})
+(test-equal "" '(+ a b c) '{a + b + c})
+;; this case is ok, but test-equal raises an error
+;;(test-equal "" '(,op x y z) '{x ,op y ,op z})
+(test-equal "" '(/ (- a) b) '{-(a) / b})
+(test-equal "" '(+ (f a b) (g h)) '{f(a b) + g(h)})
+(test-equal "" '(+ a (f b) x) '{a + f(b) + x})
+(test-equal "" '(quote (f x)) '{'f(x)} )
+
 (test-end)
