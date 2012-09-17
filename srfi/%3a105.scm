@@ -81,6 +81,7 @@
   ;; ------------------------------------------------
 
   (define (read-error msg . irr) (apply error 'read-error msg irr))
+  (define consume-to-eol get-line)
 
   ;; Read the "inside" of a list until its matching stop-char, returning list.
   ;; stop-char needs to be closing paren, closing bracket, or closing brace.
@@ -156,7 +157,8 @@
 	(neoteric-read-real (car port))))
   
   ;; reference implementation does not have this
-  (define-constant neoteric-delimiters '(#\{ #\} #\( #\) #\[ #\]))
+  (define-constant neoteric-delimiters 
+    '(#\{ #\} #\( #\) #\[ #\] #\" #\;))
   ;; is this Guile's procedure?
   (define (read-until-delim port delims)
     (do ((c (peek-char port) (peek-char port)) (r '() (cons c r)))
@@ -164,7 +166,8 @@
       (read-char port)))
   (define (read-number port initial)
     (do ((c (peek-char port) (peek-char port)) (r initial (cons c r)))
-	((or (char-whitespace? c) (not (char-numeric? c)))
+	((or (char-whitespace? c) (and (not (char-numeric? c))
+				       (not (char=? c #\.))))
 	 (string->number (list->string (reverse! r))))
       (read-char port)))
 
@@ -245,6 +248,25 @@
       (if (eof-object? prefix)
 	  prefix
 	  (neoteric-process-tail port prefix))))
+
+  ;; We have too many possibilities to handle #\# so  let reader process 
+  ;; it on Sagittarius.
+  (define process-sharp read)
+
+  (define (process-period port)
+    ;; We've peeked a period character.  Returns what it represents.
+    (read-char port) ; Remove .
+    (let ((c (peek-char port)))
+      (cond
+       ((eof-object? c) '|.|) ; period eof; return period.
+       ((char-numeric? c)
+	(read-number port (list #\.)))  ; period digit - it's a number.
+       (else
+	;; At this point, Scheme only requires support for "." or "...".
+	;; As an extension we can support them all.
+	(string->symbol
+	 (list->string (cons #\.
+			     (read-until-delim port neoteric-delimiters))))))))
 
   ;; reader macro
   (define-reader-macro |{-reader|
