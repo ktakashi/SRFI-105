@@ -5,8 +5,19 @@
     #< (srfi :105) >
     (print '{a + b})
 
-This library does not support #!srfi-105 or other #!curly-foo sh-bang. So users
-need to use Sagittarius specific reader macro import.
+or if you are using 0.3.7 (currently it's HEAD version) you can also use it with
+this syntax
+
+   #!read-macro=srfi/:105
+   (print '{a + b})
+
+or
+
+   #!read-macro=curly-infix
+   (print '{a + b})
+
+The latter form is much easier to keep compatibility with other implementation
+if it can handle `#!curly-infix` notation.
 
 ## Caution
 
