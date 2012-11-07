@@ -27,7 +27,7 @@
 ;; Ported by Takashi Kato
 ;; From reference implementation
 (library (srfi :105)
-    (export :export-reader-macro)
+    (export :export-reader-macro curly-infix-read neoteric-read)
     (import (rnrs) (sagittarius) (sagittarius reader))
   ;; Return true if lyst has an even # of parameters, and the (alternating)
   ;; first parameters are "op".  Used to determine if a longer lyst is infix.
@@ -59,7 +59,7 @@
   ;; Not a simple infix list - transform it.  Written as a separate procedure
   ;; so that future experiments or SRFIs can easily replace just this piece.
   (define (transform-mixed-infix lyst)
-    (cons 'nfx lyst))
+    (cons '$nfx$ lyst))
 
   ;; Given curly-infix lyst, map it to its final internal format.
   (define (process-curly lyst)
@@ -82,32 +82,36 @@
 
   (define (read-error msg . irr) (apply error 'read-error msg irr))
   (define consume-to-eol get-line)
+  (define (consume-whitespace port)
+    (do ((c (peek-char port) (peek-char port)))
+	((not (char-whitespace? c)) #f)
+      (get-char port)))
 
   ;; Read the "inside" of a list until its matching stop-char, returning list.
   ;; stop-char needs to be closing paren, closing bracket, or closing brace.
   ;; This is like read-delimited-list of Common Lisp.
   ;; This implements a useful extension: (. b) returns b.
-  (define (my-read-delimited-list stop-char port)
-    (let* ((c   (peek-char port)))
+  (define (my-read-delimited-list my-read stop-char port)
+    (let ((c (peek-char port)))
       (cond
        ((eof-object? c) (read-error "EOF in middle of list") '())
         ((eqv? c #\;)
 	 (consume-to-eol port)
-	 (my-read-delimited-list stop-char port))
+	 (my-read-delimited-list my-read stop-char port))
         ((char-whitespace? c)
 	 (read-char port)
-	 (my-read-delimited-list stop-char port))
+	 (my-read-delimited-list my-read stop-char port))
         ((char=? c stop-char)
 	 (read-char port)
 	 '())
-        ((or (eqv? c #\)) (eqv? c #\]) (eqv? c #\}))
+        ((memv c '(#\) #\] #\}))
 	 (read-char port)
 	 (read-error "Bad closing character" c))
         (else
-	 (let ((datum (neoteric-read port)))
+	 (let ((datum (my-read port)))
 	   (cond
 	    ((eq? datum '|.|)
-	     (let ((datum2 (neoteric-read port)))
+	     (let ((datum2 (my-read port)))
 	       (consume-whitespace port)
 	       (cond
 		((eof-object? datum2)
@@ -120,7 +124,7 @@
 		 datum2))))
 	    (else
 	     (cons datum
-		   (my-read-delimited-list stop-char port)))))))))
+		   (my-read-delimited-list my-read stop-char port)))))))))
   
   ;; Implement neoteric-_expression_'s prefixed (), [], and {}.
   ;; At this point, we have just finished reading some _expression_, which
@@ -130,26 +134,110 @@
   ;; Otherwise, just return the prefix and do not consume that next char.
   ;; This recurses, to handle formats like f(x)(y).
   (define (neoteric-process-tail port prefix)
-    (let* ((c (peek-char port)))
+    (let ((c (peek-char port)))
       (cond
        ((eof-object? c) prefix)
-       ((char=? c #\( ) ; Implement f(x).
+       ((char=? c #\( ) ; Implement f(x)
 	(read-char port)
 	(neoteric-process-tail port
-			       (cons prefix (my-read-delimited-list #\) port))))
+	  (cons prefix (my-read-delimited-list neoteric-read-real #\) port))))
        ((char=? c #\[ )  ; Implement f[x]
 	(read-char port)
-	(neoteric-process-tail port
-			       (cons 'bracketaccess
-				     (cons prefix
-					   (my-read-delimited-list #\] port)))))
-       ((char=? c #\{ )  ; Implement f{x}. Balance }
-	(neoteric-process-tail port
-			       (let ((tail (neoteric-read port)))
-				 (if (eqv? tail '())
-				     (list prefix) ; Map f{} to (f), not (f ()).
-				     (list prefix tail)))))
+	(neoteric-process-tail 
+	 port
+	 (cons '$bracket-apply$
+	       (cons prefix
+		     (my-read-delimited-list neoteric-read-real #\] port)))))
+       ((char=? c #\{ )  ; Implement f{x}
+	(read-char port)
+	(neoteric-process-tail 
+	 port
+	 (let ((tail (process-curly
+                      (my-read-delimited-list neoteric-read-real #\} port))))
+	   (if (eqv? tail '())
+	       (list prefix) ; Map f{} to (f), not (f ()).
+	       (list prefix tail)))))
        (else prefix))))
+
+  (define (underlying-read my-read port)
+    (let ((c (peek-char port)))
+      (cond
+       ((eof-object? c) c)
+       ((char=? c #\;)
+	(consume-to-eol port)
+	(my-read port))
+       ((char-whitespace? c)
+	(read-char port)
+	(my-read port))
+       ((char=? c #\( )
+	(read-char port)
+	(my-read-delimited-list my-read #\) port))
+       ((char=? c #\[ )
+	(read-char port)
+	(my-read-delimited-list my-read #\] port))
+       ((char=? c #\{ )
+	(read-char port)
+	(process-curly
+	 (my-read-delimited-list neoteric-read-real #\} port)))
+       ;; Handle missing (, [, { :
+       ((char=? c #\) )
+	(read-char port)
+	(read-error "Closing parenthesis without opening")
+	(my-read port))
+       ((char=? c #\] )
+	(read-char port)
+	(read-error "Closing bracket without opening")
+	(my-read port))
+       ((char=? c #\} )
+	(read-char port)
+	(read-error "Closing brace without opening")
+	(my-read port))
+       ((char=? c #\") ; Strings are delimited by ", so can call directly
+	(read port))
+       ((char=? c #\')
+	(read-char port)
+	(list 'quote (my-read port)))
+       ((char=? c #\`)
+	(read-char port)
+	(list 'quasiquote (my-read port)))
+       ((char=? c #\,)
+	(read-char port)
+	(cond
+	 ((char=? #\@ (peek-char port))
+	  (read-char port)
+	  (list 'unquote-splicing (my-read port)))
+	 (else
+	  (list 'unquote (my-read port)))))
+       ((char-numeric? c) ; Initial digit.
+	(read-number port '()))
+       ((char=? c #\#) (process-sharp my-read port))
+       ((char=? c #\.) (process-period port))
+       ((or (char=? c #\+) (char=? c #\-))  ; Initial + or -
+	(read-char port)
+	(if (char-numeric? (peek-char port))
+            (read-number port (list c))
+            (string->symbol
+	     (list->string (cons c
+                (read-until-delim port neoteric-delimiters))))))
+       (else ; Nothing else.  Must be a symbol start.
+	(string->symbol
+          (list->string
+	   (read-until-delim port neoteric-delimiters)))))))
+
+
+  (define (curly-infix-read-real port)
+    (underlying-read curly-infix-read-real port))
+
+  (define (curly-infix-read . port)
+    (if (null? port)
+	(curly-infix-read-real (current-input-port))
+	(curly-infix-read-real (car port))))
+
+  (define (neoteric-read-real port)
+    (let ((prefix (underlying-read neoteric-read-real port)))
+      (if (eof-object? prefix)
+	  prefix
+	  (neoteric-process-tail port prefix))))
 
   (define (neoteric-read . port)
     (if (null? port)
@@ -171,87 +259,26 @@
 	 (string->number (list->string (reverse! r))))
       (read-char port)))
 
-  ;; This is the "real" implementation of neoteric-read
-  ;; (neoteric-read just figures out the port and calls neoteric-read-real).
-  ;; It implements an entire reader, as a demonstration, but if you can
-  ;; update your existing reader you should just update that instead.
-  ;; This is a simple R5RS reader, with a few minor (common) extensions.
-  ;; The key part is that it implements [] and {} as delimiters, and
-  ;; after it reads in some datum (the "prefix"), it calls
-  ;; neoteric-process-tail to see if there's a "tail".
-  (define (neoteric-read-real port)
-    (let* ((c (peek-char port))
-	   (prefix
-	    ;; This cond is a normal Scheme reader, puts result in "prefix"
-	    ;; This implements "read-_expression_-as-usual" as described above.
-	    (cond
-	     ((eof-object? c) c)
-	     ((char=? c #\;)
-	      (consume-to-eol port)
-	      (neoteric-read-real port))
-	     ((char-whitespace? c)
-	      (read-char port)
-	      (neoteric-read-real port))
-	     ((char=? c #\( )
-	      (read-char port)
-	      (my-read-delimited-list #\) port))
-	     ((char=? c #\) )
-	      (read-char port)
-	      (read-error "Closing parenthesis without opening")
-	      (neoteric-read-real port))
-	     ((char=? c #\[ )
-	      (read-char port)
-	      (my-read-delimited-list #\] port))
-	     ((char=? c #\] )
-	      (read-char port)
-	      (read-error "Closing bracket without opening")
-	      (neoteric-read-real port))
-	     ((char=? c #\{ )
-	      (read-char port)
-	      (process-curly
-	       (my-read-delimited-list #\} port)))
-	     ((char=? c #\} )
-	      (read-char port)
-	      (read-error "Closing brace without opening")
-	      (neoteric-read-real port))
-	     ((char=? c #\") ; Strings are delimited by ", so can call directly
-	      (default-scheme-read port))
-	     ((char=? c #\')
-	      (read-char port)
-	      (list 'quote (neoteric-read-real port)))
-	     ((char=? c #\`)
-	      (read-char port)
-	      (list 'quasiquote (neoteric-read-real port)))
-	     ((char=? c #\,)
-	      (read-char port)
-	      (cond
-	       ((char=? #\@ (peek-char port))
-		(read-char port)
-		(list 'unquote-splicing (neoteric-read-real port)))
-	       (else
-		(list 'unquote (neoteric-read-real port)))))
-	     ((char-numeric? c) ; Initial digit.
-	      (read-number port '()))
-	     ((char=? c #\#) (process-sharp port))
-	     ((char=? c #\.) (process-period port))
-	     ((or (char=? c #\+) (char=? c #\-))  ; Initial + or -
-	      (read-char port)
-	      (if (char-numeric? (peek-char port))
-		  (read-number port (list c))
-		  (string->symbol (list->string 
-				   (cons c (read-until-delim 
-					    port neoteric-delimiters))))))
-	     (else ; Nothing else.  Must be a symbol start.
-	      (string->symbol (list->string
-			       (read-until-delim port neoteric-delimiters)))))))
-      ;; Here's the big change to implement neoteric-expressions:
-      (if (eof-object? prefix)
-	  prefix
-	  (neoteric-process-tail port prefix))))
-
-  ;; We have too many possibilities to handle #\# so  let reader process 
-  ;; it on Sagittarius.
-  (define process-sharp read)
+  ;; for '#' we need a special treatment not like reference implementation.
+  (define dispatch-macro-reader 
+    (receive (subr ignore) (get-macro-character #\#) subr))
+  (define (process-sharp my-read port)
+    (read-char port)			; we don't need #\#
+    (let ((c (peek-char port)))
+      ;; FIXME we assume #() is vector reader
+      ;; but user can actually change the behaviour, so we need to detect it.
+      (cond ((eqv? c #\()
+	     (read-char port)		; we don't need #\(
+	     (list->vector (my-read-delimited-list my-read #\) port)))
+	    ((eqv? c #\;)
+	     ;; handle expression comment
+	     (get-char port)
+	     ;; discards one expression
+	     (my-read port)
+	     (my-read port))
+	    (else
+	     ;; let default reader read non vector.
+	     (dispatch-macro-reader port #\#)))))
 
   (define (process-period port)
     ;; We've peeked a period character.  Returns what it represents.
@@ -271,9 +298,14 @@
   ;; reader macro
   (define-reader-macro |{-reader|
     #\{
-    (lambda (p c) (process-curly (my-read-delimited-list #\} p))))
+    (lambda (p c) 
+      ;; the very first #\{ is already consumed so we just need real process
+      ;; of this
+      (process-curly
+       (my-read-delimited-list neoteric-read-real #\} p))))
   (define-reader-macro |}-reader|
     #\}
-    (lambda (p c) (error '|}-reader| "unexpected #\\}")))
+    (lambda (p c) (error '|}-reader| "unexpected #\\}"
+			 (port-info p))))
   
   )

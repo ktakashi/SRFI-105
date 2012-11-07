@@ -1,27 +1,10 @@
 (add-load-path "./")
-#< (srfi :105) >
+#!read-macro=curly-infix
 (import (rnrs)
+	(srfi :105)
 	(srfi :64))
 
 (test-begin "SRFI-105 tests")
-
-;; from SRFI-105 samples
-(test-equal "1" '(* a (+ b c)) '{a * {b + c}})
-(test-equal "2" '(eqv? x `a) '{x eqv? `a})
-(test-equal "3" '(/ (- a) b) '{(- a) / b})
-(test-equal "4" '(+ (f a b) (g h)) '{(f a b) + (g h)})
-(test-equal "5" '(+ a (f b) x) '{a + (f b) + x})
-(test-equal "6" '(and (> a 0) (>= b 1)) '{{a > 0} and {b >= 1}})
-
-;; from http://srfi.schemers.org/srfi-105/mail-archive/msg00054.html
-(test-equal "" '(<= n 2) '{n <= 2})
-(test-equal "" '(+ a b c) '{a + b + c})
-;; this case is ok, but test-equal raises an error
-;;(test-equal "" '(,op x y z) '{x ,op y ,op z})
-(test-equal "" '(/ (- a) b) '{-(a) / b})
-(test-equal "" '(+ (f a b) (g h)) '{f(a b) + g(h)})
-(test-equal "" '(+ a (f b) x) '{a + f(b) + x})
-(test-equal "" '(quote (f x)) '{'f(x)} )
 
 ;; from examples
 ;; http://srfi.schemers.org/srfi-105/mail-archive/msg00080.html
@@ -32,6 +15,54 @@
      (test-equal expr expect
 		 (let ((p (open-string-input-port expr)))
 		   (read p))))))
+
+;; from SRFI-105 samples
+(test-infix '(<= n 5) "{n <= 5}")
+(test-infix '(+ x 1) "{x + 1}")
+(test-infix '(+ a b c) "{a + b + c}")
+(test-infix '(,op x y z) "{x ,op y ,op z}")
+(test-infix '(eqv? x `a) "{x eqv? `a}")
+(test-infix '(eq? 'a b) "{'a eq? b}")
+(test-infix '(+ n-1 n-2) "{n-1 + n-2}")
+(test-infix '(* a (+ b c)) "{a * {b + c}}")
+(test-infix '(+ a (- b c)) "{a + {b - c}}")
+(test-infix '(- (+ a b) c) "{{a + b} - c}")
+(test-infix '(and (> a 0) (>= b 1)) "{{a > 0} and {b >= 1}}")
+(test-infix '() "{}")
+(test-infix '5 "{5}")
+(test-infix '(- x) "{- x}")
+(test-infix '(>= (length x) 6) "{length(x) >= 6}")
+(test-infix '(+ (f x) (g y) (h z)) "{f(x) + g(y) + h(z)}")
+(test-infix '(+ (f a b) (g h)) "{(f a b) + (g h)}")
+(test-infix '(+ (f a b) (g h)) "{f(a b) + g(h)}")
+(test-infix ''(+ a (f b) x) "'{a + f(b) + x}")
+(test-infix '(/ (- a) b) "{(- a) / b}")
+(test-infix '(/ (- a) b) "{-(a) / b}")
+(test-infix '(cos q) "{cos(q)}")
+(test-infix '(e) "{e{}}")
+(test-infix '(pi) "{pi()}")
+(test-infix ''(f x) "{'f(x)}")
+;; we can't support SRFI-38 style with SRFI-105
+;;(test-infix '#0=(f #0#) "{#1=f(#1#)}")
+(test-infix '(f (g (h x))) "{ (f (g h(x))) }")
+(test-infix '#(1 2 (f a) 4) "{#(1 2 f(a) 4)}")
+(test-infix '(f (h x)) "{(f #;g(x) h(x))}")
+(test-infix '(map - ns) "{(map - ns)}")
+(test-infix '(map - ns) "{map(- ns)}")
+(test-infix '(* n (factorial (- n 1))) "{n * factorial{n - 1}}")
+(test-infix '(* 2 (sin (- x))) "{2 * sin{- x}}")
+(test-infix '($nfx$ 3 + 4 +) "{3 + 4 +}")
+(test-infix '($nfx$ 3 + 4 + 5 +) "{3 + 4 + 5 +}")
+(test-infix '($nfx$ a . z) "{a . z}")
+(test-infix '($nfx$ a + b - c) "{a + b - c}")
+(test-infix '(read . options) "{read(. options)}")
+(test-infix '((a x) y) "{a(x)(y)}")
+(test-infix '($bracket-apply$ x a) "{x[a]}")
+(test-infix '($bracket-apply$ y a b) "{y[a b]}")
+(test-infix '((f (- n 1)) x) "{f{n - 1}(x)}")
+(test-infix '((f (- n 1)) (- y 1)) "{f{n - 1}{y - 1}}")
+(test-infix '($bracket-apply$ (f (- x)) y) "{f{- x}[y]}")
+
 
 ;; === sweeten ===
 (test-infix '(* (length indent-increment) 3) "{length(indent-increment) * 3}")
@@ -57,6 +88,7 @@
 		  (fits-width? indent-already indent length-asline)
 		  (< (general-length m) max-unit-list-length))
 	    "{ {length-asline < max-unit-character-length} and fits-width?(indent-already indent length-asline) and {general-length(m) < max-unit-list-length} }")
+
 (test-infix '(and (char? (car x))
 		  (null? (cdr x))
 		  (eq? (car x) #\newline))
