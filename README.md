@@ -19,6 +19,4 @@ or
 The latter form is much easier to keep compatibility with other implementation
 if it can handle `#!curly-infix` notation.
 
-## Caution
-
-This SRFI is not final yet, so it has high possibility to change.
+NOTE: this library is merged into Sagittarius itself since 0.3.8.
